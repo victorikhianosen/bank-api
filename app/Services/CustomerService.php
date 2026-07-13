@@ -10,16 +10,19 @@ use App\Models\AccountRequest;
 use App\Models\Customer;
 use App\Models\Document;
 use App\Services\AuditService;
+use App\Services\NotificationService;
 use Exception;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class CustomerService
 {
     public function __construct(
-        protected AuditService $audit
+        protected AuditService $audit,
+        protected NotificationService $notification
     ) {}
 
     public function store(array $data)
@@ -32,7 +35,7 @@ class CustomerService
                 'branch_id' => $data['branch_id'],
                 'account_officer_id' => $data['account_officer_id'],
                 'customer_number' => $this->generateCustomerNumber(),
-
+                'referral_code' => $this->generateReferralCode(),
                 'title' => $data['title'],
                 'first_name' => $data['first_name'],
                 'last_name' => $data['last_name'],
@@ -61,6 +64,7 @@ class CustomerService
 
                 'created_by_type' => get_class($authUser),
                 'created_by_id' => $authUser->id,
+
             ]);
 
             $this->audit->trail(
@@ -91,199 +95,165 @@ class CustomerService
                 ]);
             }
 
-            $accountRequest = AccountRequest::create([
-                'customer_id' => $customer->id,
-                'account_product_id' => $data['account_product_id'],
-                'currency_id' => $data['currency_id'],
-                'branch_id' => $data['branch_id'],
-                'created_by_type' => get_class($authUser),
-                'created_by_id' => $authUser->id,
-            ]);
-
-            $this->audit->trail(
-                module: 'Account Request',
-                action: 'create',
-                auditableType: AccountRequest::class,
-                auditableId: $accountRequest->id,
-                before: null,
-                after: $accountRequest->toArray(),
-                description: "User {$authUser->id} created account request for {$customer->first_name} {$customer->last_name} ({$customer->customer_number})"
-            );
 
             $this->handleDocuments($customer);
 
             return [
                 'customer' => $customer,
-                'account_request' => $accountRequest
             ];
         });
     }
 
 
-    public function activate($id)
+    public function update($id, $data)
     {
-        return DB::transaction(function () use ($id) {
+        $customer = Customer::find($id);
 
-            $user = Auth::guard('user')->user();
+        if (!$customer) {
+            throw new Exception('Customer not found');
+        }
 
-            $request = AccountRequest::where('id', $id)
-                ->where('status', 'pending')
-                ->first();
+        $user = Auth::guard('user')->user();
 
-            if ($request) {
-                $customer = $request->customer;
-            } else {
-                $customer = Customer::findOrFail($id);
+        $before = $customer->toArray();
 
-                $request = AccountRequest::where('customer_id', $customer->id)
-                    ->where('status', 'pending')
-                    ->first();
-            }
+        unset($data['password'], $data['pin']);
 
-            if ($request->account_id) {
-                throw new Exception('Request already approved');
-            }
+        $customer->update($data);
 
-            $beforeCustomer = $customer->toArray();
-            $beforeRequest = $request->toArray();
+        $this->audit->trail(
+            module: 'customer',
+            action: 'update',
+            auditableType: Customer::class,
+            auditableId: $customer->id,
+            before: $before,
+            after: $customer->fresh()->toArray(),
+            description: "User {$user->id} updated customer {$customer->first_name} {$customer->last_name}"
+        );
 
-            if ($customer->status !== 'active') {
-
-                $tempPassword = Str::random(8);
-
-                $customer->status = 'active';
-                $customer->approved_by_type = get_class($user);
-                $customer->approved_by_id = $user->id;
-                $customer->approved_at = now();
-                $customer->password = bcrypt($tempPassword);
-                $customer->enable_reset_password = true;
-                $customer->save();
-
-                $this->audit->trail(
-                    module: 'customer',
-                    action: 'activate',
-                    auditableType: Customer::class,
-                    auditableId: $customer->id,
-                    before: $beforeCustomer,
-                    after: $customer->toArray(),
-                    description: "User {$user->id} activated customer {$customer->first_name} {$customer->last_name} ({$customer->customer_number})"
-                );
-            }
-
-            $account = Account::create([
-                'customer_id' => $customer->id,
-                'branch_id' => $request->branch_id,
-                'account_product_id' => $request->account_product_id,
-                'currency_id' => $request->currency_id,
-                'account_number' => $this->generateAccountNumber($request->account_product_id),
-                'account_name' => strtoupper($customer->first_name . ' ' . $customer->last_name),
-                'status' => 'active',
-                'approved_by_type' => get_class($user),
-                'approved_by_id' => $user->id,
-                'approved_at' => now(),
-            ]);
-
-            $this->audit->trail(
-                module: 'Account',
-                action: 'create',
-                auditableType: Account::class,
-                auditableId: $account->id,
-                before: null,
-                after: $account->toArray(),
-                description: "User {$user->id} created account {$account->account_number} for {$customer->first_name} {$customer->last_name} ({$customer->customer_number})"
-            );
-
-            $request->account_id = $account->id;
-            $request->status = 'approved';
-            $request->approved_by_type = get_class($user);
-            $request->approved_by_id = $user->id;
-            $request->approved_at = now();
-            $request->save();
-
-            $this->audit->trail(
-                module: 'Account Request',
-                action: 'approve',
-                auditableType: AccountRequest::class,
-                auditableId: $request->id,
-                before: $beforeRequest,
-                after: $request->toArray(),
-                description: "User {$user->id} approved account request and created account {$account->account_number} for {$customer->first_name} {$customer->last_name} ({$customer->customer_number})"
-            );
-
-            if ($customer->wasChanged('status')) {
-                Mail::to($customer->email)->queue(
-                    new CoreBankMail(
-                        subjectLine: 'Account Activated',
-                        name: $customer->first_name,
-                        content: "
-                        Your account has been created.<br><br>
-                        <strong>Account Number:</strong> {$account->account_number}<br>
-                        <strong>Username:</strong> {$customer->username}<br>
-                        <strong>Password:</strong> {$tempPassword}
-                    "
-                    )
-                );
-            }
-
-            return true;
-        });
+        return $customer->fresh();
     }
 
-    public function reject($customerId, $reason)
+
+
+    public function resetPassword($id)
     {
-        return DB::transaction(function () use ($customerId, $reason) {
+        $customer = Customer::find($id);
 
-            $user = Auth::guard('user')->user();
+        if (!$customer) {
+            throw new Exception('Customer not found');
+        }
 
-            $customer = Customer::findOrFail($customerId);
+        $user = Auth::guard('user')->user();
 
-            $request = AccountRequest::where('customer_id', $customer->id)
-                ->where('status', 'pending')
-                ->first();
+        $before = $customer->toArray();
 
-            if (!$request) {
-                throw new Exception('No pending account request found for this customer.');
-            }
+        $password = Str::random(8);
 
-            $beforeRequest = $request->toArray();
+        $customer->password = bcrypt($password);
+        $customer->enable_reset_password = true;
+        $customer->save();
 
-            $request->status = 'rejected';
-            $request->rejected_by_type = get_class($user);
-            $request->rejected_by_id = $user->id;
-            $request->rejected_at = now();
-            $request->rejection_reason = $reason;
-            $request->save();
+        $this->audit->trail(
+            module: 'customer',
+            action: 'reset_password',
+            auditableType: Customer::class,
+            auditableId: $customer->id,
+            before: $before,
+            after: $customer->toArray(),
+            description: "User {$user->id} reset password for {$customer->first_name} {$customer->last_name}"
+        );
 
-            $this->audit->trail(
-                module: 'Account Request',
-                action: 'reject',
-                auditableType: AccountRequest::class,
-                auditableId: $request->id,
-                before: $beforeRequest,
-                after: $request->toArray(),
-                description: "User {$user->id} rejected account request for {$customer->first_name} {$customer->last_name} ({$customer->customer_number}). Reason: {$reason}"
-            );
-
-            Mail::to($customer->email)->queue(
-                new CoreBankMail(
-                    subjectLine: 'Account Request Rejected',
-                    name: $customer->first_name,
-                    content: "
-                        Your account request has been rejected.<br><br>
-                        <strong>Reason:</strong> {$reason}
-                    "
-                )
-            );
-
-            return true;
-        });
+        $this->notification->sendEmail($customer, 'Password Reset', "Your new password is: {$password}");
     }
+
+
+    public function resetPin($id)
+    {
+        $customer = Customer::find($id);
+
+        if (!$customer) {
+            throw new Exception('Customer not found');
+        }
+
+        $user = Auth::guard('user')->user();
+
+        $before = $customer->toArray();
+
+        $pin = rand(1000, 9999);
+
+        $customer->pin = bcrypt($pin);
+        $customer->save();
+
+        $this->audit->trail(
+            module: 'customer',
+            action: 'reset_pin',
+            auditableType: Customer::class,
+            auditableId: $customer->id,
+            before: $before,
+            after: $customer->toArray(),
+            description: "User {$user->id} reset PIN for {$customer->first_name} {$customer->last_name}"
+        );
+
+        $this->notification->sendEmail($customer, 'PIN Reset', "Your new PIN is: {$pin}");
+    }
+
+
+    public function uploadDocument($id, $request)
+    {
+        $customer = Customer::find($id);
+
+        if (!$customer) {
+            throw new Exception('Customer not found');
+        }
+
+        $file = $request->file('file');
+        $path = $file->store('documents/' . $customer->id, 'public');
+
+        Document::create([
+            'customer_id' => $customer->id,
+            'title' => strtoupper($request->type),
+            'name' => $file->getClientOriginalName(),
+            'path' => $path,
+            'type' => $request->type,
+            'status' => 'pending',
+        ]);
+    }
+
+
+    public function toggleNotifications($id, $data)
+    {
+        $customer = Customer::find($id);
+        if (!$customer) {
+            throw new Exception('Customer not found');
+        }
+        $user = Auth::guard('user')->user();
+        $before = $customer->toArray();
+        // apply changes
+        if (isset($data['enable_email'])) {
+            $customer->enable_email = $data['enable_email'];
+        }
+        if (isset($data['enable_sms'])) {
+            $customer->enable_sms = $data['enable_sms'];
+        }
+        $customer->save();
+        $this->audit->trail(
+            module: 'customer',
+            action: 'update_notification_settings',
+            auditableType: Customer::class,
+            auditableId: $customer->id,
+            before: $before,
+            after: $customer->toArray(),
+            description: "User {$user->id} updated notification settings (email: {$customer->enable_email}, sms: {$customer->enable_sms}) for {$customer->first_name} {$customer->last_name}"
+        );
+        return $customer->fresh();
+    }
+
 
     private function handleDocuments(Customer $customer)
     {
         $authUser = Auth::guard('user')->user();
         $request = request();
-
         $documents = [
             'profile_picture' => 'profile_picture',
             'nin' => 'nin',
@@ -291,22 +261,17 @@ class CustomerService
         ];
 
         foreach ($documents as $input => $type) {
-
             if ($request->hasFile($input)) {
-
                 $file = $request->file($input);
                 $path = $file->store('documents/' . $customer->id, 'public');
-
                 Document::create([
                     'customer_id' => $customer->id,
                     'account_id' => null,
-
                     'title' => strtoupper(str_replace('_', ' ', $type)),
                     'name' => $file->getClientOriginalName(),
                     'path' => $path,
                     'type' => $type,
                     'status' => 'pending',
-
                     'uploaded_by_type' => get_class($authUser),
                     'uploaded_by_id' => $authUser->id,
                 ]);
@@ -314,35 +279,48 @@ class CustomerService
         }
     }
 
+
     private function generateCustomerNumber(): string
     {
-        do {
-            $number = 'CUS' . mt_rand(10000000, 99999999);
-        } while (Customer::where('customer_number', $number)->exists());
-
-        return $number;
-    }
-
-    private function generateAccountNumber(string $productId): string
-    {
-        $product = AccountProduct::with('accountCategory')->findOrFail($productId);
-
-        $prefix = AccountCategoryPrefix::fromCode($product->accountCategory->code);
-        $number = str_pad(mt_rand(0, 999999999), 9, '0', STR_PAD_LEFT);
-
-        return $prefix . $number;
+        return DB::transaction(function () {
+            $lastCustomer = Customer::lockForUpdate()
+                ->where('customer_number', 'LIKE', 'CUS%')
+                ->orderByDesc('id')
+                ->first();
+            $lastNumber = 0;
+            if ($lastCustomer) {
+                $lastNumber = (int) str_replace('CUS', '', $lastCustomer->customer_number);
+            }
+            $newNumber = $lastNumber + 1;
+            return 'CUS' . str_pad($newNumber, 10, '0', STR_PAD_LEFT);
+        });
     }
 
     private function generateUsername(string $firstName, string $lastName): string
     {
-        $base = strtolower($firstName . '.' . $lastName);
+        $base = strtolower(
+            preg_replace('/[^a-zA-Z0-9]/', '', $firstName . $lastName)
+        );
         $username = $base;
-        $i = 1;
-
         while (Customer::where('username', $username)->exists()) {
-            $username = $base . $i++;
+            $username = $base . rand(10, 99);
         }
-
         return $username;
     }
+
+    private function generateReferralCode(): string
+    {
+        return DB::transaction(function () {
+            do {
+                $code = 'REF' . strtoupper(Str::random(10));
+            } while (
+                Customer::lockForUpdate()
+                ->where('referral_code', $code)
+                ->exists()
+            );
+            return $code;
+        });
+    }
+
+
 }

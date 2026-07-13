@@ -3,83 +3,238 @@
 namespace App\Http\Controllers\User;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\User\Customer\StoreCustomerRequest;
+use App\Http\Requests\User\Customer\UpdateCustomerRequest;
+use App\Models\Customer;
+use App\Services\CustomerService;
 use App\Traits\HttpResponses;
 use Illuminate\Http\Request;
-use App\Services\CustomerService;
 use Illuminate\Support\Facades\Log;
 
 class CustomerController extends Controller
 {
     use HttpResponses;
+
     public function __construct(
         protected CustomerService $customerService
     ) {}
 
-
-    public function store(Request $request)
+    public function index(Request $request)
     {
-        $validated = $request->validate([
-            'branch_id' => 'required|exists:branches,id',
-            'account_officer_id' => 'required|exists:account_officers,id',
-            'account_product_id' => 'required|exists:account_products,id',
-            'currency_id' => 'required|exists:currencies,id',
+        $query = Customer::query();
 
-            'title' => 'required|string',
-            'first_name' => 'required|string',
-            'last_name' => 'required|string',
-            'middle_name' => 'nullable|string',
+        if ($request->filled('search')) {
 
-            'email' => 'required|email|unique:customers,email',
-            'phone' => 'required|string|unique:customers,phone',
-            'bvn' => 'nullable|string|unique:customers,bvn',
+            $search = trim($request->search);
 
-            'marital_status' => 'required|string',
-            'gender' => 'required|string',
-            'dob' => 'required|string',
+            $query->where(function ($q) use ($search) {
 
-            'occupation' => 'nullable|string',
-            'working_status' => 'nullable|string',
-            'business_name' => 'nullable|string',
+                $q->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('customer_number', 'like', "%{$search}%")
+                    ->orWhere('phone', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
 
-            'nin_number' => 'nullable|string|unique:customers,nin_number',
-            'tin' => 'nullable|string|unique:customers,tin',
+        if ($request->filled('status')) {
 
-            'address' => 'required|string',
-            'lga' => 'nullable|string',
-            'state' => 'nullable|string',
-            'country' => 'nullable|string',
+            $query->where(
+                'status',
+                $request->status
+            );
+        }
 
-            'mother_maiden_name' => 'nullable|string',
-            'spouse_name' => 'nullable|string',
+        $customers = $query
+            ->latest()
+            ->paginate(20);
 
-            'next_of_kin_name' => 'nullable|string',
-            'next_of_kin_phone' => 'nullable|string',
-            'next_of_kin_relationship' => 'nullable|string',
-            'next_of_kin_address' => 'nullable|string',
-        ]);
-
-        $customer = $this->customerService->store($validated);
-        return $this->success('Customer created successfully', $customer);
+        return $this->success(
+            'Customers fetched successfully',
+            $customers
+        );
     }
 
+    public function store(
+        StoreCustomerRequest $request
+    ) {
+        try {
 
+            $customer = $this->customerService->store(
+                $request->validated()
+            );
 
+            return $this->success(
+                'Customer created successfully',
+                $customer
+            );
+        } catch (\Exception $e) {
 
-    public function activate($id)
-{
-    try {
-        $this->customerService->activate($id);
+            Log::error('Customer creation failed', [
+                'message' => $e->getMessage(),
+            ]);
 
-        return $this->success('Account activated successfully');
-
-    } catch (\Exception $e) {
-
-        Log::error('Error activating account', [
-            'id' => $id,
-            'message' => $e->getMessage()
-        ]);
-
-        return $this->error($e->getMessage(), 400);
+            return $this->error(
+                $e->getMessage(),
+                400
+            );
+        }
     }
-}
+
+    public function show($id)
+    {
+            $customer = Customer::with([
+                'addresses',
+                'nextOfKins',
+                'documents'
+            ])->findOrFail($id);
+
+            return $this->success(
+                'Customer fetched successfully',
+                $customer
+            );
+        
+
+     
+    }
+
+    public function update(
+        UpdateCustomerRequest $request,
+        $id
+    ) {
+        try {
+
+            $customer = $this->customerService->update(
+                $id,
+                $request->validated()
+            );
+
+            return $this->success(
+                'Customer updated successfully',
+                $customer
+            );
+        } catch (\Exception $e) {
+
+            return $this->error(
+                $e->getMessage(),
+                400
+            );
+        }
+    }
+
+    public function destroy($id)
+    {
+        try {
+
+            $customer = Customer::findOrFail($id);
+
+            $customer->delete();
+
+            return $this->success(
+                'Customer deleted successfully'
+            );
+        } catch (\Exception $e) {
+
+            return $this->error(
+                $e->getMessage(),
+                400
+            );
+        }
+    }
+
+    public function resetPassword($id)
+    {
+        try {
+
+            $this->customerService->resetPassword($id);
+
+            return $this->success(
+                'Password reset successfully'
+            );
+        } catch (\Exception $e) {
+
+            return $this->error(
+                $e->getMessage(),
+                400
+            );
+        }
+    }
+
+    public function resetPin($id)
+    {
+        try {
+
+            $this->customerService->resetPin($id);
+
+            return $this->success(
+                'PIN reset successfully'
+            );
+        } catch (\Exception $e) {
+
+            return $this->error(
+                $e->getMessage(),
+                400
+            );
+        }
+    }
+
+    public function uploadDocument(
+        Request $request,
+        $id
+    ) {
+        try {
+
+            $request->validate([
+                'file' => 'required|file',
+                'type' => 'required|string',
+            ]);
+
+            $this->customerService->uploadDocument(
+                $id,
+                $request
+            );
+
+            return $this->success(
+                'Document uploaded successfully'
+            );
+        } catch (\Exception $e) {
+
+            return $this->error(
+                $e->getMessage(),
+                400
+            );
+        }
+    }
+
+    public function toggleNotifications(
+        Request $request,
+        $id
+    ) {
+        try {
+
+            $validated = $request->validate([
+
+                'enable_email' => 'nullable|boolean',
+
+                'enable_sms' => 'nullable|boolean',
+            ]);
+
+            $customer = $this->customerService
+                ->toggleNotifications(
+                    $id,
+                    $validated
+                );
+
+            return $this->success(
+                'Notification settings updated',
+                $customer
+            );
+        } catch (\Exception $e) {
+
+            return $this->error(
+                $e->getMessage(),
+                400
+            );
+        }
+    }
 }

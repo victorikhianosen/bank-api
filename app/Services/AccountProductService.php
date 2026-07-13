@@ -3,162 +3,229 @@
 namespace App\Services;
 
 use App\Models\AccountProduct;
-use App\Models\LedgerAccount;
-use App\Models\ProductGlMapping;
-use Exception;
+use App\Models\Currency;
+use App\Models\GeneralLedger;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class AccountProductService
 {
-    public function __construct(protected AuditService $audit) {}
-    public function create(array $data): AccountProduct
-    {
+    public function __construct(
+        private AuditService $audit
+    ) {}
 
+    public function store(array $data): AccountProduct
+    {
         return DB::transaction(function () use ($data) {
 
-            $glMappings = collect($data['gl_mappings']);
+            /*
+            |--------------------------------------------------------------------------
+            | REQUIRED FINANCIAL ACCOUNT TYPES
+            |--------------------------------------------------------------------------
+            */
 
-            if ($glMappings->pluck('gl_role')->duplicates()->isNotEmpty()) {
-                throw new Exception("Duplicate GL roles are not allowed");
-            }
+            $requiredFinancialTypes = [
 
-            if ($glMappings->pluck('ledger_account_id')->duplicates()->isNotEmpty()) {
-                throw new Exception("Same GL account cannot be assigned multiple times");
-            }
+                1 => 'Customer Deposit Control',
 
-            $allowedRoles = [
-                'customer_deposit',
-                'interest_payable',
-                'interest_income',
-                'fee_income',
-                'overdraft_receivable',
+                2 => 'Cash / Settlement',
+
+                3 => 'Interest Expense',
+
+                4 => 'Interest Payable',
+
+                5 => 'Fee Income',
+
+                6 => 'Penalty Income',
+
+                7 => 'Withholding Tax',
+
+                8 => 'Overdraft Receivable',
+
+                9 => 'Overdraft Interest Income',
             ];
 
-            foreach ($glMappings as $gl) {
-                if (!in_array($gl['gl_role'], $allowedRoles)) {
-                    throw new Exception("Invalid GL role: {$gl['gl_role']}");
+            $providedTypes = collect(
+                $data['general_ledgers']
+            )->pluck(
+                'financial_account_type'
+            )->toArray();
+
+            foreach ($requiredFinancialTypes as $type => $name) {
+
+                if (! in_array($type, $providedTypes)) {
+
+                    throw ValidationException::withMessages([
+                        'general_ledgers' => [
+                            "{$name} GL mapping is required"
+                        ]
+                    ]);
                 }
             }
 
-            $requiredRoles = ['customer_deposit'];
+            /*
+            |--------------------------------------------------------------------------
+            | VALIDATE GENERAL LEDGER CURRENCY
+            |--------------------------------------------------------------------------
+            */
 
-            $missingRoles = array_diff(
-                $requiredRoles,
-                $glMappings->pluck('gl_role')->toArray()
+            foreach ($data['general_ledgers'] as $mapping) {
+
+                $ledger = GeneralLedger::findOrFail(
+                    $mapping['general_ledger_id']
+                );
+
+                $productCurrency = Currency::findOrFail(
+                    $data['currency_id']
+                );
+
+                if ($ledger->currency_id != $productCurrency->id) {
+
+                    throw ValidationException::withMessages([
+                        'general_ledgers' => [
+
+                            "Currency mismatch for ledger '{$ledger->name}'. " .
+
+                                "Product currency is {$productCurrency->code} " .
+
+                                "but ledger currency is {$ledger->currency_code}."
+                        ]
+                    ]);
+                }
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | GET CURRENCY
+            |--------------------------------------------------------------------------
+            */
+
+            $currency = Currency::findOrFail(
+                $data['currency_id']
             );
 
-            if (!empty($missingRoles)) {
-                throw new Exception("Missing required GL roles: " . implode(', ', $missingRoles));
-            }
-
-            $authUser =  Auth::guard('user')->user();
+            /*
+            |--------------------------------------------------------------------------
+            | CREATE PRODUCT
+            |--------------------------------------------------------------------------
+            */
 
             $product = AccountProduct::create([
-                'id' => Str::ulid(),
-                'name' => $data['name'],
-                'code' => $this->generateUniqueProductCode(),
 
-                'account_category_id' => $data['account_category_id'],
-                'currency_id' => $data['currency_id'],
+                'name' => strtolower(
+                    str_replace(' ', '_', trim($data['name']))
+                ),
+
+                'code' => $this->generateProductCode(
+                    $data['product_type']
+                ),
+
+                'product_type' => strtolower(
+                    str_replace(' ', '_', trim($data['product_type']))
+                ),
+
+                'description' => $data['description'] ?? null,
+
+                'currency_id' => $currency->id,
+
+                'currency_code' => $currency->code,
+
+                'currency_digits' => $currency->decimal_places ?? 2,
 
                 'interest_rate' => $data['interest_rate'] ?? 0,
-                'transfer_fee' => $data['transfer_fee'] ?? 0,
-                'maintenance_fee' => $data['maintenance_fee'] ?? 0,
 
-                'status' => 'pending',
-                'created_by' => $authUser->id,
+                'interest_type' => $data['interest_type'],
+
+                'interest_compounding_period' =>
+                $data['interest_compounding_period'] ?? null,
+
+                'interest_posting_period' =>
+                $data['interest_posting_period'] ?? null,
+
+                'allow_overdraft' =>
+                $data['allow_overdraft'] ?? false,
+
+                'overdraft_limit' =>
+                $data['overdraft_limit'] ?? 0,
+
+                'overdraft_interest_rate' =>
+                $data['overdraft_interest_rate'] ?? 0,
+
+                'withhold_tax' =>
+                $data['withhold_tax'] ?? false,
+
+                'status' =>
+                $data['status'] ?? 'pending',
+
+                'created_by' => Auth::guard('user')->id(),
             ]);
 
-            foreach ($glMappings as $gl) {
+            /*
+            |--------------------------------------------------------------------------
+            | CREATE GL MAPPINGS
+            |--------------------------------------------------------------------------
+            */
 
-                $ledger = LedgerAccount::findOrFail($gl['ledger_account_id']);
+            foreach ($data['general_ledgers'] as $mapping) {
 
-                if (!$ledger->currency_id) {
-                    throw new Exception("GL account [{$ledger->name}] has no currency defined");
-                }
+                $product->generalLedgerMappings()->create([
 
-                if ($ledger->currency_id != $data['currency_id']) {
-                    throw new Exception(
-                        "GL account [{$ledger->name}] currency does not match product currency"
-                    );
-                }
+                    'general_ledger_id' =>
+                    $mapping['general_ledger_id'],
 
-                $existing = ProductGlMapping::where('ledger_account_id', $ledger->id)->first();
-
-                if ($existing && $existing->gl_role !== $gl['gl_role']) {
-                    throw new Exception(
-                        "GL account [{$ledger->name}] already assigned to role: {$existing->gl_role}"
-                    );
-                }
-
-                ProductGlMapping::create([
-                    'product_id' => $product->id,
-                    'gl_role' => $gl['gl_role'],
-                    'ledger_account_id' => $ledger->id,
+                    'financial_account_type' =>
+                    $mapping['financial_account_type'],
                 ]);
             }
 
-            $authUser = Auth::guard('user')->user();
-            $actorName = $authUser?->name ?? 'System';
-            $actorId   = $authUser?->id ?? 'N/A';
+            /*
+            |--------------------------------------------------------------------------
+            | AUDIT TRAIL
+            |--------------------------------------------------------------------------
+            */
 
             $this->audit->trail(
                 module: 'Account Product',
-                action: 'create Account Product',
+                action: 'Create',
                 auditableType: AccountProduct::class,
                 auditableId: $product->id,
                 before: null,
-                after: $product->toArray(),
-                description: "{$actorName} (ID: {$actorId}) created account product [{$product->name}] (ID: {$product->id})"
+                after: $product->fresh()->toArray(),
+                description: "Account Product {$product->name} created"
             );
 
-            return $product;
+            return $product->load([
+                'generalLedgerMappings.generalLedger'
+            ]);
         });
     }
 
+    private function generateProductCode(
+        string $productType
+    ): string {
 
-    public function updateStatus(array $data): AccountProduct
-    {
-        $accountProduct = AccountProduct::find($data['id']);
+        $prefix = match ($productType) {
 
-        if (!$accountProduct) {
-            throw new Exception("Account product not found");
-        }
+            'savings' => 'SVG',
 
-        $before = $accountProduct->toArray();
+            'current' => 'CUR',
 
-        $authUser = Auth::guard('user')->user();
-        $time = now();
+            'merchant' => 'MCH',
 
-        $accountProduct->update([
-            'status' => $data['status'],
-            'approved_by' => $authUser->id,
-            'approved_at' => $time,
-            'updated_at' => $time,
-        ]);
+            'corporate' => 'COR',
 
-        $this->audit->trail(
-            module: 'Account Product',
-            action: 'Update Account Product Status',
-            auditableType: AccountProduct::class,
-            auditableId: $accountProduct->id,
-            before: $before,
-            after: $accountProduct->fresh()->toArray(),
-            description: "User {$authUser->name} (ID: {$authUser->id}) updated account product [{$accountProduct->name}] (ID: {$accountProduct->id}) status to {$data['status']}"
-        );
+            'domiciliary' => 'DOM',
 
-        return $accountProduct;
-    }
+            default => 'PRD',
+        };
 
-
-    private function generateUniqueProductCode(): string
-    {
         do {
-            $code = str_pad(random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
-            $exists = AccountProduct::where('code', $code)->exists();
-        } while ($exists);
+
+            $code = $prefix . mt_rand(100000, 999999);
+        } while (
+            AccountProduct::where('code', $code)->exists()
+        );
 
         return $code;
     }

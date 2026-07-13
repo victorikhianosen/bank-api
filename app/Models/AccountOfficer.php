@@ -8,7 +8,6 @@ use Illuminate\Database\Eloquent\Model;
 class AccountOfficer extends Model
 {
 
-use HasUlids;
     protected $guarded = [];
         
         public function branch()

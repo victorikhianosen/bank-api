@@ -4,8 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class CustomerType extends Model
+class Tier extends Model
 {
-                protected $guarded = [];
+        protected $guarded = [];
 
 }

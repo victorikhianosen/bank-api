@@ -13,7 +13,6 @@ class UsersTableSeeder extends Seeder
     {
         DB::table('users')->insert([
             [
-                'id' => (string) Str::ulid(),
                 'branch_id' => 1,
                 'first_name' => 'Victor',
                 'last_name' => 'David',
@@ -40,7 +39,6 @@ class UsersTableSeeder extends Seeder
             ],
 
             [
-                'id' => (string) Str::ulid(),
                 'branch_id' => 1,
                 'first_name' => 'Sam',
                 'last_name' => 'Johnson',

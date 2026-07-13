@@ -4,8 +4,9 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class GeneralLedgerTransaction extends Model
+class JournalEntry extends Model
 {
-    protected $guarded = [];
+        protected $guarded = [];
 
+    //
 }

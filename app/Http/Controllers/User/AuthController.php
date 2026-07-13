@@ -5,11 +5,13 @@ namespace App\Http\Controllers\User;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\AuditService;
+use App\Services\TelegramService;
 use App\Services\UserService;
 use App\Traits\HttpResponses;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -17,12 +19,12 @@ class AuthController extends Controller
 
     public function __construct(
         private UserService $userService,
-        private AuditService $audit
+        private AuditService $audit,
+
     ) {}
 
     public function login(Request $request)
     {
-
         $request->validate([
             'username' => 'required|exists:users,username',
             'password' => 'required'
@@ -74,6 +76,8 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
+
+
         $user = Auth::guard('user')->user();
         $loginTime = $user->last_login ?? null;
         $logoutTime = now();

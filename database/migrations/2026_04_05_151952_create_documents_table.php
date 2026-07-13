@@ -14,9 +14,8 @@ return new class extends Migration
         Schema::create('documents', function (Blueprint $table) {
             $table->id();
 
-            $table->foreignUlid('customer_id')->constrained()->cascadeOnDelete();
-            $table->foreignUlid('account_id')->nullable()->constrained()->nullOnDelete();
-
+            $table->foreignId('customer_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('account_id')->nullable()->constrained()->nullOnDelete();
 
             $table->string('title')->nullable();
             $table->string('name')->nullable();
@@ -32,13 +31,11 @@ return new class extends Migration
                 'rejected',
             ])->default('pending');
 
-            $table->foreignUlid('approved_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('approved_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('approved_at')->nullable();
 
-
-            $table->foreignUlid('rejected_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('rejected_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('rejected_at')->nullable();
-
 
             $table->longText('comments')->nullable();
 

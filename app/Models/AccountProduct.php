@@ -2,19 +2,24 @@
 
 namespace App\Models;
 
-use App\Models\AccountCategory;
-use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AccountProduct extends Model
 {
-
-    use HasUlids;
-
     protected $guarded = [];
 
-    public function accountCategory()
+    /*
+    |--------------------------------------------------------------------------
+    | RELATIONSHIPS
+    |--------------------------------------------------------------------------
+    */
+
+    public function generalLedgerMappings(): HasMany
     {
-        return $this->belongsTo(AccountCategory::class);
+        return $this->hasMany(
+            AccountProductGlMapping::class,
+            'account_product_id'
+        );
     }
 }

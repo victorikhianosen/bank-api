@@ -12,24 +12,34 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('account_requests', function (Blueprint $table) {
-            $table->ulid('id')->primary();
+            $table->id();
 
-            $table->foreignUlid('customer_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('customer_id')->constrained()->cascadeOnDelete();
 
-            $table->foreignUlid('account_id')
+            $table->foreignId('account_id')
                 ->nullable()
                 ->constrained('accounts')
                 ->nullOnDelete();
 
-            $table->foreignUlid('account_product_id')->constrained();
             $table->foreignId('currency_id')->constrained('currencies');
             $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
 
             $table->enum('status', ['pending', 'approved', 'rejected'])->default('pending');
 
-            $table->nullableUlidMorphs('created_by');
-            $table->nullableUlidMorphs('approved_by');
-            $table->nullableUlidMorphs('rejected_by');
+            $table->foreignId('created_by')
+                ->nullable()
+                ->constrained('users')
+                ->nullOnDelete();
+
+            $table->foreignId('approved_by')
+                ->nullable()
+                ->constrained('users')
+                ->nullOnDelete();
+
+            $table->foreignId('rejected_by')
+                ->nullable()
+                ->constrained('users')
+                ->nullOnDelete();
 
             $table->timestamp('approved_at')->nullable();
             $table->timestamp('rejected_at')->nullable();

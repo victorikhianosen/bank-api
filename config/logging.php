@@ -127,15 +127,14 @@ return [
         'emergency' => [
             'path' => storage_path('logs/laravel.log'),
         ],
-
         'telegram' => [
             'driver' => 'monolog',
-            'handler' => TelegramBotHandler::class,
-            'with' => [
+            'handler' => \Monolog\Handler\TelegramBotHandler::class,
+            'handler_with' => [
                 'apiKey' => env('TELEGRAM_BOT_TOKEN'),
-                'channel' => env('TELEGRAM_CHAT_ID'),
+                'chatId' => env('TELEGRAM_CHAT_ID'),
             ],
-            'level' => 'error',
+            'level' => 'debug',
         ],
 
     ],

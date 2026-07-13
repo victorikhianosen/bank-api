@@ -17,15 +17,15 @@ class DatabaseSeeder extends Seeder
     {
 
         $this->call([
+            CurrencySeeder::class,
             BranchSeeder::class,
             UsersTableSeeder::class,
             RolesAndPermissionsSeeder::class,
             SettingsSeeder::class,
             AccountOfficerSeeder::class,
+            GeneralLedgerSeeder::class,
+            DomiciliaryGeneralLedgerSeeder::class,
 
-            CurrencySeeder::class,
-            LedgerAccountSeeder::class,
-            AccountCategorySeeder::class,
         ]);
     }
 }

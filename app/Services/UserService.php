@@ -64,7 +64,7 @@ class UserService
 
             $this->audit->trail(
                 module: 'User',
-                action: 'Create',
+                action: 'Create Customer',
                 auditableType: User::class,
                 auditableId: $user->id,
                 before: null,

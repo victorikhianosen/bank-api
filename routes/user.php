@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\User\AccountCategoryController;
+use App\Http\Controllers\User\AccountController;
 use App\Http\Controllers\User\AccountOfficerController;
 use App\Http\Controllers\User\AccountProductController;
 use App\Http\Controllers\User\AccountTypeController;
@@ -8,7 +9,9 @@ use App\Http\Controllers\User\AuthController;
 use App\Http\Controllers\User\BranchController;
 use App\Http\Controllers\User\CurrencyController;
 use App\Http\Controllers\User\CustomerController;
+use App\Http\Controllers\User\GeneralLedger;
 use App\Http\Controllers\User\GeneralLedgerController;
+use App\Http\Controllers\User\InternalTransferController;
 use App\Http\Controllers\User\PermissionController;
 use App\Http\Controllers\User\RoleController;
 use App\Http\Controllers\User\SettingsController;
@@ -26,7 +29,6 @@ use Illuminate\Support\Facades\Route;
 Route::post('login', [AuthController::class, 'login']);
 Route::post('verify/2fa-code', [UserController::class, 'verify2faOtp']);
 // });
-
 Route::middleware('user:user')->group(function () {
     // USERS
     Route::get('list', [UserController::class, 'index']);
@@ -85,7 +87,7 @@ Route::middleware('user:user')->group(function () {
 
     // CURRENCY
     Route::prefix('currencies')->group(function () {
-        Route::get('list', [CurrencyController::class, 'index']);
+        Route::get('/', [CurrencyController::class, 'index']);
     });
 
     Route::prefix('customer')->group(function () {
@@ -102,14 +104,6 @@ Route::middleware('user:user')->group(function () {
     });
 
 
-    // ACCOUNT CATEGORY
-    Route::prefix('account-categories')->group(function () {
-        Route::get('/', [AccountCategoryController::class, 'index']);
-        Route::post('/', [AccountCategoryController::class, 'store']);
-        Route::get('{id}', [AccountCategoryController::class, 'show']);
-        Route::put('{id}', [AccountCategoryController::class, 'update']); // name only
-        Route::post('{id}/status', [AccountCategoryController::class, 'updateStatus']);
-    });
 
 
     // ACCOUNT PRODUCT
@@ -123,11 +117,39 @@ Route::middleware('user:user')->group(function () {
 
     // Customers
     Route::prefix('customer')->group(function () {
+
+        Route::get('/', [CustomerController::class, 'index']);
+        Route::get('/{id}', [CustomerController::class, 'show']);
+
         Route::post('/', [CustomerController::class, 'store']);
         Route::post('/{id}/activate', [CustomerController::class, 'activate']);
         Route::post('/{id}/reject', [CustomerController::class, 'reject']);
+
+        Route::put('/{id}', [CustomerController::class, 'update']);
+
+        Route::post('/{id}/reset-pin', [CustomerController::class, 'resetPin']);
+        Route::post('/{id}/reset-password', [CustomerController::class, 'resetPassword']);
+
+        Route::post('/{id}/upload-document', [CustomerController::class, 'uploadDocument']);
+        Route::post('/document/{id}/approve', [CustomerController::class, 'approveDocument']);
+
+        Route::post('/{id}/toggle-notifications', [CustomerController::class, 'toggleNotifications']);
     });
 
+
+
+    Route::prefix('account')->group(function () {
+        Route::get('/', [AccountController::class, 'index']);
+        Route::get('/{id}', [AccountController::class, 'show']);
+        Route::post('/', [AccountController::class, 'store']);
+    });
+
+
+
+    Route::prefix('transfer')->group(function () {
+
+        Route::post( '/internal',[InternalTransferController::class, 'store']);
+    });
 
 
 

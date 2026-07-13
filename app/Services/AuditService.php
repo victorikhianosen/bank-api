@@ -38,7 +38,7 @@ class AuditService
             'description' => $description,
             'ip' => request()->ip(),
             'agent' => request()->userAgent(),
-            'channel' => AuditChannel::resolve(request()->header('X-Channel')) ? request()->header('X-Channel') : 'web',
+            'channel' => AuditChannel::resolve(request()->header('X-Channel'))
 
         ]);
     }

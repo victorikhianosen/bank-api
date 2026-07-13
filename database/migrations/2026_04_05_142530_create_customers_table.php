@@ -12,24 +12,16 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('customers', function (Blueprint $table) {
-            $table->ulid('id')->primary();
+            $table->id();
             $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
-            $table->foreignUlid('account_officer_id')->nullable()->constrained('account_officers')->nullOnDelete();
+            $table->foreignId('account_officer_id')->nullable()->constrained('account_officers')->nullOnDelete();
             $table->string('customer_number')->unique()->index();
-            $table->enum('customer_type', [
-                'individual',
-                'corporate',
-                'merchant',
-                'government',
-                'ngo',
-                'agent',
-            ])->default('individual');
 
             $table->string('referral_code')->unique()->nullable()->index();
 
             $table->string('customer_request')->nullable();
 
-            $table->foreignUlid('guardian_id')
+            $table->foreignId('guardian_id')
                 ->nullable()
                 ->constrained('customers')
                 ->nullOnDelete();

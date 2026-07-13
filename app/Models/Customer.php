@@ -2,12 +2,12 @@
 
 namespace App\Models;
 
+use App\Models\Document;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 
 class Customer extends Model
 {
-    use HasUlids;
     protected $guarded = [];
 
     public function accounts()
@@ -23,5 +23,10 @@ class Customer extends Model
     public function nextOfKins()
     {
         return $this->hasMany(NextOfKin::class);
+    }
+
+       public function documents()
+    {
+        return $this->hasMany(Document::class);
     }
 }
